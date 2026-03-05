@@ -161,6 +161,7 @@ const PORTFOLIO = [
   { name: "ソフトフロントホールディングス", symbol: "2321.T", shares: 300, avgPrice: 110.22 },
   { name: "アライドテレシス",               symbol: "6835.T", shares: 61,  avgPrice: 172    },
   { name: "エムビーエス",                   symbol: "1401.T", shares: 107, avgPrice: 919    },
+  { name: "三越伊勢丹ホールディングス",                   symbol: "3099.T", shares: 100, avgPrice: 1135    },
   { name: "帝人",                   symbol: "3401.T", shares: 1787.272, avgPrice: 1595.7    },
 ];
 </script>
@@ -341,6 +342,10 @@ function buildCard(stock, idx) {
       <div class="stat-cell">
         <div class="stat-label">一株あたり損益</div>
         <div class="stat-value neutral" id="${id}-pershare">—</div>
+      </div>
+      <div class="stat-cell">
+        <div class="stat-label">現時点の資産額</div>
+        <div class="stat-value neutral">¥${fmt(stock.shares * stock.avgPrice)}</div>
       </div>
     </div>
     <div class="pnl-banner neutral-banner" id="${id}-pnl">
@@ -631,4 +636,3 @@ window.addEventListener('DOMContentLoaded', () => refreshAll());
 </script>
 </body>
 </html>
-
