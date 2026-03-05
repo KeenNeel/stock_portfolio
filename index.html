@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>株価チェック</title>
+<title>株式ポートフォリオ</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap');
@@ -126,7 +126,7 @@
   .pnl-banner .pnl-per { font-family: var(--mono); font-size: 12px; opacity: 0.8; }
 
   /* カード下部: 詳細リンク */
-  .card-footer { padding: 10px 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; }
+  .card-footer { padding: 10px 16px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
   .btn-detail {
     display: inline-flex; align-items: center; gap: 5px;
     padding: 5px 12px; border: 1px solid var(--border); border-radius: 6px;
@@ -134,6 +134,8 @@
     cursor: pointer; text-decoration: none; transition: all 0.15s; letter-spacing: 1px;
   }
   .btn-detail:hover { border-color: var(--accent); color: var(--accent); }
+  .btn-ai { border-color: rgba(16,185,129,0.4); color: var(--green); }
+  .btn-ai:hover { border-color: var(--green); color: var(--green); background: rgba(16,185,129,0.08); }
 
   .card-error { padding: 24px 16px; text-align: center; color: var(--red); font-family: var(--mono); font-size: 12px; }
   .shimmer { background: linear-gradient(90deg, var(--surface) 0%, var(--surface2) 50%, var(--surface) 100%); background-size: 200% 100%; animation: shimmer 1.4s infinite; border-radius: 4px; }
@@ -165,7 +167,7 @@ const PORTFOLIO = [
 <header class="header">
   <div class="header-title">
     <span class="label">Portfolio Tracker</span>
-    <h1>株価チェック</h1>
+    <h1>株式ポートフォリオ</h1>
   </div>
   <div class="header-right">
     <span class="last-updated" id="lastUpdated">未取得</span>
@@ -294,11 +296,13 @@ function buildCard(stock, idx) {
   const div = document.createElement('div');
   div.className = 'card loading-card';
   div.id = id;
-  // Yahoo Finance リンク（日本株は .T を除いて数字コード）
-  const yfSymbol = stock.symbol.endsWith('.T')
-    ? stock.symbol.replace('.T', '') + '.T'
-    : stock.symbol;
-  const yfUrl = `https://finance.yahoo.co.jp/quote/${yfSymbol}`;
+  // リンクURL生成
+  const isJP     = stock.symbol.endsWith('.T');
+  const code     = isJP ? stock.symbol.replace('.T', '') : stock.symbol;
+  const yfSymbol = isJP ? code + '.T' : stock.symbol;
+  const yfUrl    = `https://finance.yahoo.co.jp/quote/${yfSymbol}`;
+  // 株探: PTS株価をPCブラウザで確認できる唯一の無料サービス
+  const ptsUrl   = `https://kabutan.jp/stock/?code=${code}`;
 
   div.innerHTML = `
     <div class="card-header">
@@ -346,7 +350,9 @@ function buildCard(stock, idx) {
       </div>
     </div>
     <div class="card-footer">
-      <a href="${yfUrl}" target="_blank" class="btn-detail">Yahoo Finance で詳細を見る ↗</a>
+      <a href="${yfUrl}" target="_blank" class="btn-detail">Yahoo Finance ↗</a>
+      ${isJP ? `<a href="${ptsUrl}" target="_blank" class="btn-detail btn-pts">🌙 PTS株価(株探) ↗</a>` : ''}
+      <button class="btn-detail btn-ai" onclick="openAIAnalysis(${idx})">🤖 AI分析 ↗</button>
     </div>`;
   return div;
 }
@@ -511,7 +517,79 @@ function updateSummary() {
   document.getElementById('sumPnLSub').textContent  = `損益合計 ${pnlSign(pct)}${pct.toFixed(2)}%`;
 }
 
-// ── メイン更新 ──────────────────────────────────────────
+// ── AI分析: ChatGPTにプロンプトを渡して開く ─────────────
+function openAIAnalysis(idx) {
+  const stock = PORTFOLIO[idx];
+  const data  = stockData[stock.symbol];
+
+  const price     = data ? data.price     : '不明';
+  const prevClose = data ? data.prevClose : '不明';
+  const dayChg    = data ? (data.price - data.prevClose).toFixed(2) : '不明';
+  const dayChgPct = data ? (((data.price - data.prevClose) / data.prevClose) * 100).toFixed(2) : '不明';
+  const perShare  = data ? (data.price - stock.avgPrice).toFixed(2) : '不明';
+  const totalPnL  = data ? ((data.price - stock.avgPrice) * stock.shares).toFixed(0) : '不明';
+  const pnlPct    = data ? (((data.price - stock.avgPrice) / stock.avgPrice) * 100).toFixed(2) : '不明';
+
+  // 直近5日間の株価履歴
+  const historyStr = data && data.history.length > 0
+    ? data.history.slice(-5).map(h => `${h.date}: ¥${h.close.toFixed(1)}`).join(' / ')
+    : '取得できず';
+
+  const prompt = `以下の株式について、プロの株式アナリストとして詳細な投資分析を行ってください。
+
+━━━━━━━━━━━━━━━━━━━━
+■ 銘柄情報
+━━━━━━━━━━━━━━━━━━━━
+銘柄名    : ${stock.name}
+証券コード : ${stock.symbol}
+現在株価  : ¥${price}
+前日比    : ¥${dayChg}（${dayChgPct}%）
+直近5日   : ${historyStr}
+
+■ 保有状況
+保有株数      : ${stock.shares}株
+平均買付単価  : ¥${stock.avgPrice}
+一株損益      : ¥${perShare}
+含み損益合計  : ¥${totalPnL}（${pnlPct}%）
+
+━━━━━━━━━━━━━━━━━━━━
+
+以下の項目について詳しく分析してください：
+
+1. 【株価の背景・現状分析】
+   - 現在の株価水準の評価
+   - 直近の値動きの背景・要因
+
+2. 【買いタイミング】
+   - 具体的な買い増し・新規購入を検討すべき株価水準や条件
+   - テクニカル・ファンダメンタルの両面から
+
+3. 【売りタイミング】
+   - 利益確定・損切りを検討すべき株価水準や条件
+   - 私の現在の保有状況を踏まえた具体的なアドバイス
+
+4. 【投資家の動向分析】
+   - 短期投機筋 vs 長期投資家の動き
+   - 機関投資家・個人投資家の行動パターン
+   - 信用取引・空売り残の状況予測
+
+5. 【注意点・リスク要因】
+   - この銘柄特有のリスク
+   - マクロ環境・業界動向の影響
+   - 決算・イベントスケジュール
+
+6. 【総合判断】
+   - 現時点での投資判断（強気/中立/弱気）
+   - 3ヶ月・6ヶ月・1年の株価見通し
+   - 私の保有ポジションへの具体的な推奨アクション
+
+※ 免責事項も必ず最後に記載してください。`;
+
+  const chatGPTUrl = `https://chatgpt.com/?q=${encodeURIComponent(prompt)}`;
+  window.open(chatGPTUrl, '_blank');
+}
+
+
 async function refreshAll() {
   const btn = document.getElementById('btnRefresh');
   btn.disabled = true;
