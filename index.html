@@ -101,6 +101,7 @@
   .card-price-block { text-align: right; }
   .card-price-block .price { font-family: var(--mono); font-size: 21px; font-weight: 600; }
   .card-price-block .day-change { font-family: var(--mono); font-size: 11px; margin-top: 2px; }
+  .card-price-block .price-time { font-family: var(--sans); font-size: 10px; color: var(--text3); margin-top: 2px; }
 
   /* チャート期間切り替え */
   .chart-controls { padding: 8px 14px; display: flex; gap: 4px; border-bottom: 1px solid var(--border); background: var(--surface2); }
@@ -151,18 +152,13 @@
 </head>
 <body>
 
-<!-- =====================================================
-  ★ 銘柄設定はここを編集してください ★
-  日本株: 証券コード + ".T"  例: "7203.T"（トヨタ）
-  米国株: ティッカーそのまま 例: "AAPL"
-====================================================== -->
 <script>
 const PORTFOLIO = [
   { name: "ソフトフロントホールディングス", symbol: "2321.T", shares: 300, avgPrice: 110.22 },
   { name: "アライドテレシス",               symbol: "6835.T", shares: 61,  avgPrice: 172    },
   { name: "エムビーエス",                   symbol: "1401.T", shares: 107, avgPrice: 919    },
-  { name: "三越伊勢丹ホールディングス",                   symbol: "3099.T", shares: 100, avgPrice: 1135    },
-  { name: "帝人",                   symbol: "3401.T", shares: 1787.272, avgPrice: 1595.7    },
+  { name: "三越伊勢丹ホールディングス",     symbol: "3099.T", shares: 100, avgPrice: 1135   },
+  { name: "帝人",                           symbol: "3401.T", shares: 1787.272, avgPrice: 1595.7 },
 ];
 </script>
 
@@ -180,7 +176,6 @@ const PORTFOLIO = [
   </div>
 </header>
 
-<!-- 指数バー -->
 <div class="index-bar" id="indexBar">
   <div class="index-item"><span class="idx-name">日経平均</span><span class="idx-price index-loading" id="idx-nk">取得中...</span><span class="idx-change" id="idx-nk-c"></span></div>
   <div class="index-item"><span class="idx-name">NYダウ</span><span class="idx-price index-loading" id="idx-dji">取得中...</span><span class="idx-change" id="idx-dji-c"></span></div>
@@ -219,7 +214,9 @@ function fmt(n) {
   if (n == null || isNaN(n)) return '—';
   return n.toLocaleString('ja-JP', { maximumFractionDigits: 2 });
 }
-function pnlSign(n)        { return (n == null || isNaN(n)) ? '' : n >= 0 ? '+' : ''; }
+
+// 修正点：プラスは＋、マイナスは▲に変更
+function pnlSign(n)        { return (n == null || isNaN(n)) ? '' : n > 0 ? '＋' : n < 0 ? '▲' : ''; }
 function pnlClass(n)       { return (n == null || isNaN(n)) ? 'neutral' : n > 0 ? 'up' : n < 0 ? 'down' : 'neutral'; }
 function pnlBannerClass(n) { return (n == null || isNaN(n)) ? 'neutral-banner' : n > 0 ? 'up-banner' : n < 0 ? 'down-banner' : 'neutral-banner'; }
 
@@ -232,16 +229,24 @@ function toggleTheme() {
   // チャート再描画（背景色が変わるため）
   PORTFOLIO.forEach((s, idx) => {
     const d = stockData[s.symbol];
-    if (d) drawChart('card-' + idx, getHistoryForRange(d, chartRanges[idx] || '1W'), s.avgPrice, pnlClass(d.price - d.prevClose));
+    if (d) drawChart('card-' + idx, d.history, s.avgPrice, pnlClass(d.price - d.prevClose));
   });
 }
 
 // ── Yahoo Finance 取得 ──────────────────────────────────
-const RANGE_MAP = { '1W': '7d', '1M': '1mo', '3M': '3mo', '6M': '6mo', '1Y': '1y' };
-
-async function fetchQuote(symbol, range = '7d') {
+async function fetchQuote(symbol, rangeKey = '1W') {
   const cb  = Date.now();
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=${range}&_cb=${cb}`;
+  
+  // 修正点：1Dと3Dを追加
+  const RANGE_MAP = { '1D': '1d', '3D': '3d', '1W': '7d', '1M': '1mo', '3M': '3mo', '6M': '6mo', '1Y': '1y' };
+  const range = RANGE_MAP[rangeKey] || '7d';
+
+  // 1Dと3Dの場合は時間単位（インターバル）を細かくする
+  let interval = '1d';
+  if (rangeKey === '1D') interval = '5m';
+  if (rangeKey === '3D') interval = '15m';
+
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&_cb=${cb}`;
   const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
   if (!res.ok) throw new Error(`通信エラー (${res.status})`);
   const json   = await res.json();
@@ -253,14 +258,24 @@ async function fetchQuote(symbol, range = '7d') {
   const history    = timestamps.map((ts, i) => {
     if (closes[i] == null) return null;
     const d = new Date(ts * 1000);
-    return { date: `${d.getMonth()+1}/${d.getDate()}`, close: closes[i] };
+    
+    // 1Dや3Dの場合は時間をラベルにする
+    let dateStr = `${d.getMonth()+1}/${d.getDate()}`;
+    if (rangeKey === '1D') {
+      dateStr = `${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
+    } else if (rangeKey === '3D') {
+      dateStr = `${d.getDate()}日 ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
+    }
+
+    return { date: dateStr, close: closes[i] };
   }).filter(Boolean);
 
   return {
-    price:     result.meta.regularMarketPrice,
-    prevClose: result.meta.chartPreviousClose,
+    price:      result.meta.regularMarketPrice,
+    prevClose:  result.meta.chartPreviousClose,
+    marketTime: result.meta.regularMarketTime, // 修正点：時刻データを取得
     history,
-    allHistory: history, // キャッシュ
+    allHistory: history,
   };
 }
 
@@ -279,17 +294,12 @@ async function fetchIndex(symbol, priceId, changeId) {
     const cl    = pnlClass(chg);
     document.getElementById(priceId).textContent  = fmt(price);
     document.getElementById(priceId).className    = `idx-price ${cl}`;
-    document.getElementById(changeId).textContent = `${pnlSign(chg)}${fmt(Math.abs(chg))} (${pnlSign(pct)}${pct.toFixed(2)}%)`;
+    // 絶対値(Math.abs)を使って、記号が重複しないように修正
+    document.getElementById(changeId).textContent = `${pnlSign(chg)}${fmt(Math.abs(chg))} (${pnlSign(pct)}${Math.abs(pct).toFixed(2)}%)`;
     document.getElementById(changeId).className   = `idx-change ${cl}`;
   } catch(e) {
     document.getElementById(priceId).textContent = '取得失敗';
   }
-}
-
-function getHistoryForRange(data, rangeKey) {
-  // すでにフェッチ済みのデータから日数でスライス（簡易）
-  const days = { '1W': 7, '1M': 22, '3M': 66, '6M': 130, '1Y': 260 };
-  return (data.history || []).slice(-(days[rangeKey] || 7));
 }
 
 // ── カード構築 ──────────────────────────────────────────
@@ -298,12 +308,10 @@ function buildCard(stock, idx) {
   const div = document.createElement('div');
   div.className = 'card loading-card';
   div.id = id;
-  // リンクURL生成
   const isJP     = stock.symbol.endsWith('.T');
   const code     = isJP ? stock.symbol.replace('.T', '') : stock.symbol;
   const yfSymbol = isJP ? code + '.T' : stock.symbol;
   const yfUrl    = `https://finance.yahoo.co.jp/quote/${yfSymbol}`;
-  // 株探: PTS株価をPCブラウザで確認できる唯一の無料サービス
   const ptsUrl   = `https://kabutan.jp/stock/?code=${code}`;
 
   div.innerHTML = `
@@ -315,10 +323,10 @@ function buildCard(stock, idx) {
       <div class="card-price-block">
         <div class="price neutral shimmer" style="width:110px;height:24px;" id="${id}-price"></div>
         <div class="day-change" id="${id}-daychange"></div>
-      </div>
+        <div class="price-time" id="${id}-pricetime"></div> </div>
     </div>
     <div class="chart-controls">
-      ${['1W','1M','3M','6M','1Y'].map(r =>
+      ${['1D','3D','1W','1M','3M','6M','1Y'].map(r =>
         `<button class="range-btn ${r==='1W'?'active':''}" onclick="changeRange(${idx},'${r}',this)">${r}</button>`
       ).join('')}
     </div>
@@ -345,7 +353,7 @@ function buildCard(stock, idx) {
       </div>
       <div class="stat-cell">
         <div class="stat-label">現時点の資産額</div>
-        <div class="stat-value neutral">¥${fmt(stock.shares * stock.avgPrice)}</div>
+        <div class="stat-value neutral" id="${id}-assetvalue">—</div>
       </div>
     </div>
     <div class="pnl-banner neutral-banner" id="${id}-pnl">
@@ -369,22 +377,18 @@ async function changeRange(idx, rangeKey, btn) {
   const stock = PORTFOLIO[idx];
   chartRanges[idx] = rangeKey;
 
-  // ボタンのアクティブ状態
   btn.closest('.chart-controls').querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
 
-  // 新しいレンジで再フェッチ
   const ph  = document.getElementById(`${id}-chartph`);
   const cvs = document.getElementById(`${id}-chart`);
   if (ph)  { ph.style.display = 'flex'; ph.textContent = '取得中...'; }
   if (cvs) cvs.style.display = 'none';
 
   try {
-    const range = RANGE_MAP[rangeKey] || '7d';
-    const data  = await fetchQuote(stock.symbol, range);
-    stockData[stock.symbol] = data;
-    const d   = data;
-    const dc  = pnlClass(d.price - d.prevClose);
+    const data  = await fetchQuote(stock.symbol, rangeKey);
+    stockData[stock.symbol] = data; // 状態更新
+    const dc  = pnlClass(data.price - data.prevClose);
     drawChart(id, data.history, stock.avgPrice, dc);
   } catch(e) {
     if (ph) ph.textContent = '取得失敗';
@@ -398,12 +402,13 @@ function updateCard(idx, stock, data) {
   if (!card) return;
   card.classList.remove('loading-card');
 
-  const { price, prevClose } = data;
+  const { price, prevClose, marketTime } = data;
   const dayChg    = price - prevClose;
   const dayChgPct = prevClose ? (dayChg / prevClose) * 100 : 0;
   const perShare  = price - stock.avgPrice;
   const totalPnL  = perShare * stock.shares;
   const pnlPct    = stock.avgPrice ? (perShare / stock.avgPrice) * 100 : 0;
+  const assetValue = price * stock.shares; // 修正点：資産額の計算
   const dc = pnlClass(dayChg);
   const pc = pnlClass(perShare);
 
@@ -411,8 +416,14 @@ function updateCard(idx, stock, data) {
   priceEl.className   = 'price ' + dc;
   priceEl.textContent = '¥' + fmt(price);
 
+  // 修正点：絶対値(Math.abs)を使って、マイナス記号の重複を防ぐ
   document.getElementById(`${id}-daychange`).className   = 'day-change ' + dc;
-  document.getElementById(`${id}-daychange`).textContent = `${pnlSign(dayChg)}¥${fmt(Math.abs(dayChg))} (${pnlSign(dayChgPct)}${dayChgPct.toFixed(2)}%) 前日比`;
+  document.getElementById(`${id}-daychange`).textContent = `${pnlSign(dayChg)}¥${fmt(Math.abs(dayChg))} (${pnlSign(dayChgPct)}${Math.abs(dayChgPct).toFixed(2)}%) 前日比`;
+
+  // 修正点：市場時刻の変換と表示
+  const mTime = new Date(marketTime * 1000);
+  const timeStr = `${mTime.getHours()}時${String(mTime.getMinutes()).padStart(2, '0')}分`;
+  document.getElementById(`${id}-pricetime`).textContent = `${timeStr} 時点`;
 
   document.getElementById(`${id}-curprice`).className   = 'stat-value ' + dc;
   document.getElementById(`${id}-curprice`).textContent = '¥' + fmt(price);
@@ -420,11 +431,14 @@ function updateCard(idx, stock, data) {
   document.getElementById(`${id}-pershare`).className   = 'stat-value ' + pc;
   document.getElementById(`${id}-pershare`).textContent = `${pnlSign(perShare)}¥${fmt(Math.abs(perShare))}`;
 
+  // 修正点：資産額を画面に反映
+  document.getElementById(`${id}-assetvalue`).textContent = '¥' + fmt(assetValue);
+
   document.getElementById(`${id}-pnl`).className        = 'pnl-banner ' + pnlBannerClass(totalPnL);
   document.getElementById(`${id}-pnltotal`).className   = 'pnl-total ' + pc;
   document.getElementById(`${id}-pnltotal`).textContent = `${pnlSign(totalPnL)}¥${fmt(Math.abs(totalPnL))}`;
   document.getElementById(`${id}-pnlper`).className     = 'pnl-per ' + pc;
-  document.getElementById(`${id}-pnlper`).textContent   = `(${pnlSign(pnlPct)}${pnlPct.toFixed(2)}%)`;
+  document.getElementById(`${id}-pnlper`).textContent   = `(${pnlSign(pnlPct)}${Math.abs(pnlPct).toFixed(2)}%)`;
 
   drawChart(id, data.history, stock.avgPrice, dc);
 }
@@ -463,7 +477,6 @@ function drawChart(id, history, avgPrice, colorClass) {
   const lineColor = colorClass === 'up' ? '#10b981' : colorClass === 'down' ? '#ef4444' : '#3b82f6';
   const fillColor = colorClass === 'up' ? 'rgba(16,185,129,0.1)' : colorClass === 'down' ? 'rgba(239,68,68,0.1)' : 'rgba(59,130,246,0.1)';
 
-  // X軸ラベルの間引き（データ数に応じて）
   const maxLabels = 6;
   const step      = Math.max(1, Math.floor(history.length / maxLabels));
 
@@ -520,7 +533,7 @@ function updateSummary() {
   const el = document.getElementById('sumPnL');
   el.textContent = `${pnlSign(pnl)}¥${fmt(Math.abs(pnl))}`;
   el.className   = 's-value ' + pnlClass(pnl);
-  document.getElementById('sumPnLSub').textContent  = `損益合計 ${pnlSign(pct)}${pct.toFixed(2)}%`;
+  document.getElementById('sumPnLSub').textContent  = `損益合計 ${pnlSign(pct)}${Math.abs(pct).toFixed(2)}%`;
 }
 
 // ── AI分析: ChatGPTにプロンプトを渡して開く ─────────────
@@ -536,7 +549,6 @@ function openAIAnalysis(idx) {
   const totalPnL  = data ? ((data.price - stock.avgPrice) * stock.shares).toFixed(0) : '不明';
   const pnlPct    = data ? (((data.price - stock.avgPrice) / stock.avgPrice) * 100).toFixed(2) : '不明';
 
-  // 直近5日間の株価履歴
   const historyStr = data && data.history.length > 0
     ? data.history.slice(-5).map(h => `${h.date}: ¥${h.close.toFixed(1)}`).join(' / ')
     : '取得できず';
@@ -552,7 +564,7 @@ function openAIAnalysis(idx) {
 前日比    : ¥${dayChg}（${dayChgPct}%）
 直近5日   : ${historyStr}
 
-■ 保有状況
+■ 保拓状況
 保有株数      : ${stock.shares}株
 平均買付単価  : ¥${stock.avgPrice}
 一株損益      : ¥${perShare}
@@ -612,10 +624,10 @@ async function refreshAll() {
   container.innerHTML = '';
   PORTFOLIO.forEach((s, i) => { chartRanges[i] = '1W'; container.appendChild(buildCard(s, i)); });
 
-  // 銘柄を並列取得
+  // 銘柄を並列取得 (1W = 7dとして初期表示)
   await Promise.all(PORTFOLIO.map(async (stock, idx) => {
     try {
-      const data = await fetchQuote(stock.symbol, '7d');
+      const data = await fetchQuote(stock.symbol, '1W');
       stockData[stock.symbol] = data;
       updateCard(idx, stock, data);
     } catch(e) {
