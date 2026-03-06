@@ -51,7 +51,7 @@
   /* ── ボタン共通 ── */
   .btn {
     display: flex; align-items: center; gap: 6px; padding: 8px 16px;
-    border: none; border-radius: 8px; font-family: var(--mono); font-size: 12px;
+    border: none; border-radius: 8px; font-family: var(--sans); font-size: 12px;
     font-weight: 600; cursor: pointer; transition: all 0.2s; white-space: nowrap;
   }
   .btn-primary { background: var(--accent); color: #fff; }
@@ -104,8 +104,8 @@
   .card-price-block .price-time { font-family: var(--sans); font-size: 10px; color: var(--text3); margin-top: 2px; }
 
   /* チャート期間切り替え */
-  .chart-controls { padding: 8px 14px; display: flex; gap: 4px; border-bottom: 1px solid var(--border); background: var(--surface2); }
-  .range-btn { padding: 3px 10px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text3); font-family: var(--mono); font-size: 10px; cursor: pointer; transition: all 0.15s; }
+  .chart-controls { padding: 8px 14px; display: flex; gap: 4px; border-bottom: 1px solid var(--border); background: var(--surface2); flex-wrap: wrap; }
+  .range-btn { padding: 3px 8px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text3); font-family: var(--mono); font-size: 10px; cursor: pointer; transition: all 0.15s; }
   .range-btn:hover { border-color: var(--accent); color: var(--accent); }
   .range-btn.active { background: var(--accent); border-color: var(--accent); color: #fff; }
 
@@ -154,7 +154,7 @@
 
 <script>
 const PORTFOLIO = [
-  { name: "ソフトフロントホールディングス", symbol: "2321.T", shares: 300, avgPrice: 110.22 },
+  { name: "ソフトフロントホールディングス", symbol: "2321.T", shares: 200, avgPrice: 110.22 },
   { name: "アライドテレシス",               symbol: "6835.T", shares: 61,  avgPrice: 172    },
   { name: "エムビーエス",                   symbol: "1401.T", shares: 107, avgPrice: 919    },
   { name: "三越伊勢丹ホールディングス",     symbol: "3099.T", shares: 100, avgPrice: 1135   },
@@ -169,7 +169,7 @@ const PORTFOLIO = [
   </div>
   <div class="header-right">
     <span class="last-updated" id="lastUpdated">未取得</span>
-    <button class="btn btn-ghost" id="btnTheme" onclick="toggleTheme()" title="テーマ切り替え">🌙 ダーク</button>
+    <button class="btn btn-ghost" id="btnTheme" onclick="toggleTheme()" title="テーマ切り替え">画面色変更</button>
     <button class="btn btn-primary" id="btnRefresh" onclick="refreshAll()">
       <span class="refresh-icon">↻</span><span>更新</span>
     </button>
@@ -207,7 +207,7 @@ const PORTFOLIO = [
 // ── 状態管理 ────────────────────────────────────────────
 const charts    = {};
 const stockData = {};
-const chartRanges = {}; // 各カードの選択中レンジ
+const chartRanges = {}; 
 
 // ── ヘルパー ────────────────────────────────────────────
 function fmt(n) {
@@ -215,7 +215,6 @@ function fmt(n) {
   return n.toLocaleString('ja-JP', { maximumFractionDigits: 2 });
 }
 
-// 修正点：プラスは＋、マイナスは▲に変更
 function pnlSign(n)        { return (n == null || isNaN(n)) ? '' : n > 0 ? '＋' : n < 0 ? '▲' : ''; }
 function pnlClass(n)       { return (n == null || isNaN(n)) ? 'neutral' : n > 0 ? 'up' : n < 0 ? 'down' : 'neutral'; }
 function pnlBannerClass(n) { return (n == null || isNaN(n)) ? 'neutral-banner' : n > 0 ? 'up-banner' : n < 0 ? 'down-banner' : 'neutral-banner'; }
@@ -225,8 +224,8 @@ function toggleTheme() {
   const html = document.documentElement;
   const isDark = html.getAttribute('data-theme') === 'dark';
   html.setAttribute('data-theme', isDark ? 'light' : 'dark');
-  document.getElementById('btnTheme').textContent = isDark ? '🌙 ダーク' : '☀️ ライト';
-  // チャート再描画（背景色が変わるため）
+  
+  // チャート再描画（背景や文字の色が変わるため）
   PORTFOLIO.forEach((s, idx) => {
     const d = stockData[s.symbol];
     if (d) drawChart('card-' + idx, d.history, s.avgPrice, pnlClass(d.price - d.prevClose));
@@ -237,14 +236,16 @@ function toggleTheme() {
 async function fetchQuote(symbol, rangeKey = '1W') {
   const cb  = Date.now();
   
-  // 修正点：1Dと3Dを追加
-  const RANGE_MAP = { '1D': '1d', '3D': '3d', '1W': '7d', '1M': '1mo', '3M': '3mo', '6M': '6mo', '1Y': '1y' };
+  // 修正点：5Y と 10Y を追加
+  const RANGE_MAP = { '1D': '1d', '3D': '3d', '1W': '7d', '1M': '1mo', '3M': '3mo', '6M': '6mo', '1Y': '1y', '5Y': '5y', '10Y': '10y' };
   const range = RANGE_MAP[rangeKey] || '7d';
 
-  // 1Dと3Dの場合は時間単位（インターバル）を細かくする
+  // 期間に応じたインターバル（データ粒度）の調整
   let interval = '1d';
   if (rangeKey === '1D') interval = '5m';
   if (rangeKey === '3D') interval = '15m';
+  if (rangeKey === '5Y') interval = '1wk'; // 5年は週足で取得し、負荷を軽減
+  if (rangeKey === '10Y') interval = '1mo'; // 10年は月足で取得
 
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&_cb=${cb}`;
   const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
@@ -259,12 +260,14 @@ async function fetchQuote(symbol, rangeKey = '1W') {
     if (closes[i] == null) return null;
     const d = new Date(ts * 1000);
     
-    // 1Dや3Dの場合は時間をラベルにする
+    // チャートのX軸ラベルの表示形式を期間に応じて切り替え
     let dateStr = `${d.getMonth()+1}/${d.getDate()}`;
     if (rangeKey === '1D') {
       dateStr = `${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
     } else if (rangeKey === '3D') {
       dateStr = `${d.getDate()}日 ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
+    } else if (rangeKey === '5Y' || rangeKey === '10Y') {
+      dateStr = `${d.getFullYear()}/${d.getMonth()+1}`; // 年と月を表示
     }
 
     return { date: dateStr, close: closes[i] };
@@ -273,7 +276,7 @@ async function fetchQuote(symbol, rangeKey = '1W') {
   return {
     price:      result.meta.regularMarketPrice,
     prevClose:  result.meta.chartPreviousClose,
-    marketTime: result.meta.regularMarketTime, // 修正点：時刻データを取得
+    marketTime: result.meta.regularMarketTime, 
     history,
     allHistory: history,
   };
@@ -294,7 +297,6 @@ async function fetchIndex(symbol, priceId, changeId) {
     const cl    = pnlClass(chg);
     document.getElementById(priceId).textContent  = fmt(price);
     document.getElementById(priceId).className    = `idx-price ${cl}`;
-    // 絶対値(Math.abs)を使って、記号が重複しないように修正
     document.getElementById(changeId).textContent = `${pnlSign(chg)}${fmt(Math.abs(chg))} (${pnlSign(pct)}${Math.abs(pct).toFixed(2)}%)`;
     document.getElementById(changeId).className   = `idx-change ${cl}`;
   } catch(e) {
@@ -323,10 +325,11 @@ function buildCard(stock, idx) {
       <div class="card-price-block">
         <div class="price neutral shimmer" style="width:110px;height:24px;" id="${id}-price"></div>
         <div class="day-change" id="${id}-daychange"></div>
-        <div class="price-time" id="${id}-pricetime"></div> </div>
+        <div class="price-time" id="${id}-pricetime"></div>
+      </div>
     </div>
     <div class="chart-controls">
-      ${['1D','3D','1W','1M','3M','6M','1Y'].map(r =>
+      ${['1D','3D','1W','1M','3M','6M','1Y','5Y','10Y'].map(r =>
         `<button class="range-btn ${r==='1W'?'active':''}" onclick="changeRange(${idx},'${r}',this)">${r}</button>`
       ).join('')}
     </div>
@@ -408,7 +411,7 @@ function updateCard(idx, stock, data) {
   const perShare  = price - stock.avgPrice;
   const totalPnL  = perShare * stock.shares;
   const pnlPct    = stock.avgPrice ? (perShare / stock.avgPrice) * 100 : 0;
-  const assetValue = price * stock.shares; // 修正点：資産額の計算
+  const assetValue = price * stock.shares; 
   const dc = pnlClass(dayChg);
   const pc = pnlClass(perShare);
 
@@ -416,11 +419,9 @@ function updateCard(idx, stock, data) {
   priceEl.className   = 'price ' + dc;
   priceEl.textContent = '¥' + fmt(price);
 
-  // 修正点：絶対値(Math.abs)を使って、マイナス記号の重複を防ぐ
   document.getElementById(`${id}-daychange`).className   = 'day-change ' + dc;
   document.getElementById(`${id}-daychange`).textContent = `${pnlSign(dayChg)}¥${fmt(Math.abs(dayChg))} (${pnlSign(dayChgPct)}${Math.abs(dayChgPct).toFixed(2)}%) 前日比`;
 
-  // 修正点：市場時刻の変換と表示
   const mTime = new Date(marketTime * 1000);
   const timeStr = `${mTime.getHours()}時${String(mTime.getMinutes()).padStart(2, '0')}分`;
   document.getElementById(`${id}-pricetime`).textContent = `${timeStr} 時点`;
@@ -431,7 +432,6 @@ function updateCard(idx, stock, data) {
   document.getElementById(`${id}-pershare`).className   = 'stat-value ' + pc;
   document.getElementById(`${id}-pershare`).textContent = `${pnlSign(perShare)}¥${fmt(Math.abs(perShare))}`;
 
-  // 修正点：資産額を画面に反映
   document.getElementById(`${id}-assetvalue`).textContent = '¥' + fmt(assetValue);
 
   document.getElementById(`${id}-pnl`).className        = 'pnl-banner ' + pnlBannerClass(totalPnL);
