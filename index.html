@@ -232,9 +232,11 @@ function toggleTheme() {
   });
 }
 
+// ── GASプロキシ設定 ─────────────────────────────────────
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbyXhFNs6WtmchomfbO1AExuiWI5u-OlDgEw6FZ0ytehk6CEuioK69ALSkoPxUv41dJ-/exec';
+
 // ── Yahoo Finance 取得 ──────────────────────────────────
 async function fetchQuote(symbol, rangeKey = '1W') {
-  const cb  = Date.now();
   
   // 修正点：5Y と 10Y を追加
   const RANGE_MAP = { '1D': '1d', '3D': '3d', '1W': '7d', '1M': '1mo', '3M': '3mo', '6M': '6mo', '1Y': '1y', '5Y': '5y', '10Y': '10y' };
@@ -247,12 +249,30 @@ async function fetchQuote(symbol, rangeKey = '1W') {
   if (rangeKey === '5Y') interval = '1wk'; // 5年は週足で取得し、負荷を軽減
   if (rangeKey === '10Y') interval = '1mo'; // 10年は月足で取得
 
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&_cb=${cb}`;
-  const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
+  const url = `${GAS_URL}?symbol=${encodeURIComponent(symbol)}&interval=${interval}&range=${range}`;
+  const res = await fetch(url, { cache: 'no-store' });
   if (!res.ok) throw new Error(`通信エラー (${res.status})`);
   const json   = await res.json();
   const result = json?.chart?.result?.[0];
   if (!result) throw new Error('銘柄が見つかりません');
+
+  // 【修正箇所】前日終値を確実に取得・補完するロジック
+  let prevClose = result.meta.regularMarketPreviousClose || result.meta.previousClose;
+  if (!prevClose) {
+    if (range === '1d') {
+      prevClose = result.meta.chartPreviousClose;
+    } else {
+      try {
+        // APIに前日終値が含まれない場合、確実な前日比を出すために「1日分」のデータを裏で取得
+        const fbUrl = `${GAS_URL}?symbol=${encodeURIComponent(symbol)}&interval=1d&range=1d`;
+        const fbRes = await fetch(fbUrl, { cache: 'no-store' });
+        const fbJson = await fbRes.json();
+        prevClose = fbJson?.chart?.result?.[0]?.meta?.chartPreviousClose || result.meta.chartPreviousClose;
+      } catch(e) {
+        prevClose = result.meta.chartPreviousClose;
+      }
+    }
+  }
 
   const timestamps = result.timestamp || [];
   const closes     = result.indicators?.quote?.[0]?.close || [];
@@ -275,7 +295,7 @@ async function fetchQuote(symbol, rangeKey = '1W') {
 
   return {
     price:      result.meta.regularMarketPrice,
-    prevClose:  result.meta.chartPreviousClose,
+    prevClose:  prevClose,
     marketTime: result.meta.regularMarketTime, 
     history,
     allHistory: history,
@@ -285,25 +305,36 @@ async function fetchQuote(symbol, rangeKey = '1W') {
 // 指数取得
 async function fetchIndex(symbol, priceId, changeId) {
   try {
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=1d&range=2d`;
-    const res = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`);
+    // 【修正箇所】前日比の基準がズレないよう range=1d に固定
+    const url = `${GAS_URL}?symbol=${encodeURIComponent(symbol)}&interval=5m&range=1d`;
+    const res = await fetch(url, { cache: 'no-store' });
     const json   = await res.json();
     const result = json?.chart?.result?.[0];
     if (!result) return;
+    
     const price = result.meta.regularMarketPrice;
-    const prev  = result.meta.chartPreviousClose;
+    // range=1d にしたことで chartPreviousClose が確実に「1日前の終値」になる
+    const prev  = result.meta.regularMarketPreviousClose || result.meta.previousClose || result.meta.chartPreviousClose;
     const chg   = price - prev;
     const pct   = (chg / prev) * 100;
     const cl    = pnlClass(chg);
-    document.getElementById(priceId).textContent  = fmt(price);
-    document.getElementById(priceId).className    = `idx-price ${cl}`;
-    document.getElementById(changeId).textContent = `${pnlSign(chg)}${fmt(Math.abs(chg))} (${pnlSign(pct)}${Math.abs(pct).toFixed(2)}%)`;
-    document.getElementById(changeId).className   = `idx-change ${cl}`;
+    
+    // Cannot set properties of null エラー回避のため、要素の存在確認を追加
+    const pEl = document.getElementById(priceId);
+    const cEl = document.getElementById(changeId);
+    if (pEl) {
+      pEl.textContent = fmt(price);
+      pEl.className   = `idx-price ${cl}`;
+    }
+    if (cEl) {
+      cEl.textContent = `${pnlSign(chg)}${fmt(Math.abs(chg))} (${pnlSign(pct)}${Math.abs(pct).toFixed(2)}%)`;
+      cEl.className   = `idx-change ${cl}`;
+    }
   } catch(e) {
-    document.getElementById(priceId).textContent = '取得失敗';
+    const pEl = document.getElementById(priceId);
+    if (pEl) pEl.textContent = '取得失敗';
   }
 }
-
 // ── カード構築 ──────────────────────────────────────────
 function buildCard(stock, idx) {
   const id  = 'card-' + idx;
